@@ -14,11 +14,13 @@ from pydantic import BaseModel
 from .embedding_pipeline import EmbeddingPipeline
 from .recommender import build_user_scores, load_interactions, personalize_candidates
 from .vector_db import VectorDB
-from .database import init_db, log_search, log_grade, get_search_history, get_search_results
-from .metrics import get_system_metrics
+from .database import init_db, log_search, log_grade, get_search_history, get_search_results, seed_initial_grades
+from .metrics import get_system_metrics, compute_ndcg_at_k, compute_ap
 from .indexer import spimi_index, boolean_search, save_index
+from .fusion_model import FusionModel
 
-app = FastAPI(title="Multimodal Search & Recommendation API")
+
+app = FastAPI(title="Bridging the Modality Gap: Adaptive Feature Dropout and Hybrid Indexing in Multimodal E-Commerce Search API")
 
 # Enable CORS for Streamlit
 app.add_middleware(
@@ -81,6 +83,10 @@ async def startup_event():
         # Save index to disk
         spimi_idx = spimi_index(docs, block_size=20)
         save_index(spimi_idx, "data/spimi_index.json")
+        
+        # Seed initial query grades for evaluation
+        seed_initial_grades(metadata)
+
 
     # 4. Load Vector DBs if embeddings exist
     if EMBEDDING_DIR.exists():
@@ -106,7 +112,9 @@ async def startup_event():
             vector_db_fused.build_index(fused_embs)
 
     # 5. Initialize the embedding pipeline once globally (saves loading models repeatedly)
-    pipeline = EmbeddingPipeline()
+    checkpoint_file = str(EMBEDDING_DIR / "fusion_model.pt")
+    pipeline = EmbeddingPipeline(checkpoint_path=checkpoint_file)
+
 
 
 @app.post("/search")
@@ -114,7 +122,8 @@ async def search(
     user_id: str = Form(...),
     query: str | None = Form(None),
     image: UploadFile | None = File(None),
-    search_type: str = Form("vector")  # "vector" or "classical"
+    search_type: str = Form("vector"),  # "vector" or "classical"
+    index_mode: str = Form("fused")     # "fused" (single index) or "split" (split indices)
 ):
     if metadata is None:
         return {"error": "Metadata catalog not loaded."}
@@ -194,19 +203,52 @@ async def search(
 
         # Scenario B: Text-only Semantic Search
         elif query_str:
-            if vector_db_text is None:
-                return {"error": "Text embedding index is not loaded."}
-            query_text_emb = pipeline.text_model.encode([query_str]).numpy()
-            distances, indices = vector_db_text.search(query_text_emb, k=20)
-            candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
+            if index_mode == "fused":
+                # Single Index Routing: project query text with zeroed image vector in fused space
+                if vector_db_fused is None:
+                    return {"error": "Fused embedding index is not loaded."}
+                text_emb_tensor = pipeline.text_model.encode([query_str]).to(pipeline.device)
+                query_text_emb = text_emb_tensor.cpu().numpy()
+                
+                # Zero out image embedding tensor
+                zero_image_emb = torch.zeros(1, 2048, device=pipeline.device)
+                with torch.no_grad():
+                    fused_emb = pipeline.fusion_model(text_emb_tensor, zero_image_emb).cpu().numpy()
+                
+                distances, indices = vector_db_fused.search(fused_emb, k=20)
+                candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
+            else:
+                # Split Index Routing (Baseline)
+                if vector_db_text is None:
+                    return {"error": "Text embedding index is not loaded."}
+                query_text_emb = pipeline.text_model.encode([query_str]).numpy()
+                distances, indices = vector_db_text.search(query_text_emb, k=20)
+                candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
 
         # Scenario C: Image-only Semantic Search
         elif saved_image_path:
-            if vector_db_image is None:
-                return {"error": "Image embedding index is not loaded."}
-            query_image_emb = pipeline.image_model.encode([saved_image_path]).numpy()
-            distances, indices = vector_db_image.search(query_image_emb, k=20)
-            candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
+            if index_mode == "fused":
+                # Single Index Routing: project query image with zeroed text vector in fused space
+                if vector_db_fused is None:
+                    return {"error": "Fused embedding index is not loaded."}
+                image_emb_tensor = pipeline.image_model.encode([saved_image_path]).to(pipeline.device)
+                query_image_emb = image_emb_tensor.cpu().numpy()
+                
+                # Zero out text embedding tensor
+                zero_text_emb = torch.zeros(1, 384, device=pipeline.device)
+                with torch.no_grad():
+                    fused_emb = pipeline.fusion_model(zero_text_emb, image_emb_tensor).cpu().numpy()
+                
+                distances, indices = vector_db_fused.search(fused_emb, k=20)
+                candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
+            else:
+                # Split Index Routing (Baseline)
+                if vector_db_image is None:
+                    return {"error": "Image embedding index is not loaded."}
+                query_image_emb = pipeline.image_model.encode([saved_image_path]).numpy()
+                distances, indices = vector_db_image.search(query_image_emb, k=20)
+                candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
+
 
     # 3. PERSONALIZATION RE-RANKING
     if user_scores is not None and user_id.strip():
@@ -308,6 +350,151 @@ async def grade(
 async def metrics():
     system_metrics = get_system_metrics()
     return system_metrics
+
+
+class AblationRequest(BaseModel):
+    missing_rate: float
+
+
+@app.post("/simulate-ablation")
+async def simulate_ablation(req: AblationRequest):
+    if metadata is None or text_embeddings is None or image_embeddings is None:
+        return {"error": "Catalog metadata or pre-computed embeddings are not loaded."}
+        
+    missing_rate = req.missing_rate
+    if not (0.0 <= missing_rate <= 1.0):
+        return {"error": "missing_rate must be between 0.0 and 1.0"}
+        
+    # Simulate missing images in the catalog by zeroing out visual vectors
+    np.random.seed(42)
+    N = len(metadata)
+    
+    # Identify random indices to drop visual features
+    dropped_mask = np.random.rand(N) < missing_rate
+    
+    text_t = torch.tensor(text_embeddings, dtype=torch.float32, device=pipeline.device)
+    image_t = torch.tensor(image_embeddings, dtype=torch.float32, device=pipeline.device)
+    
+    image_dropped_t = image_t.clone()
+    # Zero out visual embeddings for the selected dropped subset
+    image_dropped_t[dropped_mask] = 0.0
+    
+    # 1. Baseline: Untrained Model (random weights initialized and evaluated on zeroed inputs)
+    untrained_model = FusionModel().to(pipeline.device)
+    untrained_model.eval()
+    
+    # 2. Proposed: Trained Resilient Model
+    pipeline.fusion_model.eval()
+    
+    baseline_fused = []
+    proposed_fused = []
+    batch_size = 64
+    
+    with torch.no_grad():
+        for i in range(0, N, batch_size):
+            b_text = text_t[i : i + batch_size]
+            b_image = image_dropped_t[i : i + batch_size]
+            
+            # Project using untrained model
+            z_untrained = untrained_model(b_text, b_image)
+            baseline_fused.append(z_untrained.cpu().numpy())
+            
+            # Project using trained dropout-resilient model
+            z_trained = pipeline.fusion_model(b_text, b_image)
+            proposed_fused.append(z_trained.cpu().numpy())
+            
+    baseline_fused = np.concatenate(baseline_fused, axis=0)
+    proposed_fused = np.concatenate(proposed_fused, axis=0)
+    
+    # Query database for all unique user graded queries to run evaluation against
+    conn = sqlite3.connect(database.DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT query_text, image_path FROM grades")
+    queries_rows = cursor.fetchall()
+    
+    if not queries_rows:
+        conn.close()
+        return {
+            "missing_rate": missing_rate,
+            "baseline": {"NDCG@10": 0.0, "MAP": 0.0},
+            "proposed": {"NDCG@10": 0.0, "MAP": 0.0},
+            "graded_queries_count": 0
+        }
+        
+    baseline_ndcgs = []
+    baseline_maps = []
+    proposed_ndcgs = []
+    proposed_maps = []
+    
+    for row in queries_rows:
+        q_text = row["query_text"]
+        q_img = row["image_path"]
+        
+        # Load human grades for this query
+        cursor.execute("SELECT item_id, rating FROM grades WHERE query_text = ? AND image_path = ?", (q_text, q_img))
+        grades_dict = {str(r["item_id"]): int(r["rating"]) for r in cursor.fetchall()}
+        
+        if not grades_dict:
+            continue
+            
+        # Extract query representations
+        q_text_emb_t = pipeline.text_model.encode([q_text]).to(pipeline.device) if q_text else None
+        q_image_emb_t = None
+        if q_img and Path(q_img).exists():
+            q_image_emb_t = pipeline.image_model.encode([q_img]).to(pipeline.device)
+            
+        # Get query fused vectors for baseline and proposed models
+        if q_text_emb_t is not None and q_image_emb_t is not None:
+            with torch.no_grad():
+                q_fused_untrained = untrained_model(q_text_emb_t, q_image_emb_t).cpu().numpy().reshape(-1)
+                q_fused_trained = pipeline.fusion_model(q_text_emb_t, q_image_emb_t).cpu().numpy().reshape(-1)
+        elif q_text_emb_t is not None:
+            zero_img = torch.zeros(1, 2048, device=pipeline.device)
+            with torch.no_grad():
+                q_fused_untrained = untrained_model(q_text_emb_t, zero_img).cpu().numpy().reshape(-1)
+                q_fused_trained = pipeline.fusion_model(q_text_emb_t, zero_img).cpu().numpy().reshape(-1)
+        elif q_image_emb_t is not None:
+            zero_text = torch.zeros(1, 384, device=pipeline.device)
+            with torch.no_grad():
+                q_fused_untrained = untrained_model(zero_text, q_image_emb_t).cpu().numpy().reshape(-1)
+                q_fused_trained = pipeline.fusion_model(zero_text, q_image_emb_t).cpu().numpy().reshape(-1)
+        else:
+            continue
+            
+        # Search baseline
+        scores_untrained = np.dot(baseline_fused, q_fused_untrained)
+        indices_untrained = np.argsort(scores_untrained)[::-1][:10]
+        results_untrained = [str(metadata.iloc[idx]["item_id"]) for idx in indices_untrained]
+        
+        rels_untrained = [float(grades_dict.get(item_id, 0)) for item_id in results_untrained]
+        baseline_ndcgs.append(compute_ndcg_at_k(rels_untrained, k=10))
+        baseline_maps.append(compute_ap([grades_dict.get(item_id, 0) >= 3 for item_id in results_untrained]))
+        
+        # Search proposed
+        scores_trained = np.dot(proposed_fused, q_fused_trained)
+        indices_trained = np.argsort(scores_trained)[::-1][:10]
+        results_trained = [str(metadata.iloc[idx]["item_id"]) for idx in indices_trained]
+        
+        rels_trained = [float(grades_dict.get(item_id, 0)) for item_id in results_trained]
+        proposed_ndcgs.append(compute_ndcg_at_k(rels_trained, k=10))
+        proposed_maps.append(compute_ap([grades_dict.get(item_id, 0) >= 3 for item_id in results_trained]))
+        
+    conn.close()
+    
+    return {
+        "missing_rate": missing_rate,
+        "baseline": {
+            "NDCG@10": float(np.mean(baseline_ndcgs)) if baseline_ndcgs else 0.0,
+            "MAP": float(np.mean(baseline_maps)) if baseline_maps else 0.0
+        },
+        "proposed": {
+            "NDCG@10": float(np.mean(proposed_ndcgs)) if proposed_ndcgs else 0.0,
+            "MAP": float(np.mean(proposed_maps)) if proposed_maps else 0.0
+        },
+        "graded_queries_count": len(baseline_ndcgs)
+    }
+
 
 
 @app.get("/search-history")

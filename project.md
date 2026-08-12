@@ -1,9 +1,9 @@
-# Honors Project: Multimodal Search and Context-Aware Recommender Engine
+# Honors Project: Bridging the Modality Gap: Adaptive Feature Dropout and Hybrid Indexing in Multimodal E-Commerce Search
 
 ## I. Software Requirement Document (SRD)
 
 ### 1. Project Title
-Multimodal Search and Context-Aware Recommender Engine
+Bridging the Modality Gap: Adaptive Feature Dropout and Hybrid Indexing in Multimodal E-Commerce Search
 
 ### 2. Purpose
 To develop an intelligent information retrieval and recommendation system that accepts both text and image inputs (multimodal), processes the semantic meaning of these inputs, and delivers highly personalized search results based on user context and historical interaction data.
@@ -31,16 +31,30 @@ To develop an intelligent information retrieval and recommendation system that a
 ### 1. Algorithmic Specifications
 * **Text Processing (NLP):** Implementation of a transformer-based model (e.g., BERT or RoBERTa) to tokenize and generate dense vector representations of textual data.
 * **Image Processing (CV):** Implementation of a Convolutional Neural Network (e.g., ResNet50) or Vision Transformer (ViT) to extract visual feature vectors.
-* **Embedding Fusion (ANN):** A Two-Tower Neural Network architecture where the text and image embeddings are concatenated and passed through dense layers to create a unified multimodal vector.
+* **Embedding Fusion (ANN) with Adaptive Modality Dropout (Novelty 1):** A Two-Tower projection network that maps textual and visual embeddings to a shared 256-dimensional space. During training, the network is subjected to sample-wise Bernoulli-structured modality dropout (zeroing out text or image vectors randomly) to force resilience against missing modality inputs.
 * **Recommendation Engine:** A Hybrid filtering model combining Neural Collaborative Filtering (NCF) for user-item interactions and Content-Based Filtering utilizing the multimodal vectors.
 
 ### 2. Indexing Strategy
 To ensure the information retrieval component is efficient, the textual metadata will utilize advanced indexing algorithms. We will implement and compare Blocked Sort-Based Indexing (BSBI) and Single-Pass In-Memory Indexing (SPIMI). This comparison will serve as a strong technical contribution to your research paper, demonstrating optimization in handling the inverted index before the deep learning models take over for semantic ranking.
 
-### 3. Mathematical Specifications for Retrieval
-Distance between query embeddings and item embeddings will be computed using Cosine Similarity.
+### 3. Mathematical Specifications for Modality Dropout & Retrieval
+#### A. Structured Modality Dropout
+During a training batch forward pass, the input text embeddings $X_{text}$ and image embeddings $X_{image}$ are modulated by independent Bernoulli random variables $r_t \sim \text{Bernoulli}(p_t)$ and $r_v \sim \text{Bernoulli}(p_v)$ representing retention masks:
+$$H_{fused} = \text{Normalize}\left( \text{FC}\left(\text{cat}\left(X_{text} \odot r_t, X_{image} \odot r_v\right)\right) \right)$$
+Starving the text modality forces visual weights to construct highly discriminative representations, avoiding text-induced modality collapse.
 
+#### B. Self-Supervised Objective (InfoNCE + Consistency Regularization)
+The fusion network parameters are trained using a joint self-supervised objective over three views (full multimodal, text-only, image-only):
+$$\mathcal{L} = \mathcal{L}_{contrastive} + \lambda \mathcal{L}_{cons}$$
+where:
+* **Consistency Loss ($\mathcal{L}_{cons}$)**: Penalizes Euclidean distance between full multimodal representations and unimodal counterparts:
+  $$\mathcal{L}_{cons} = \mathbb{E}\left[ \|H_{fused}^{(text, image)} - H_{fused}^{(text, 0)}\|_2^2 + \|H_{fused}^{(text, image)} - H_{fused}^{(0, image)}\|_2^2 \right]$$
+* **Contrastive Loss ($\mathcal{L}_{contrastive}$)**: Multi-view NT-Xent (InfoNCE) loss aligning matched item representations across views and separating non-matched items.
+
+#### C. Distance Metric
+Distance between query embeddings and item embeddings in the shared latent space is computed using Cosine Similarity:
 `similarity = cos(θ) = (A · B) / (||A|| ||B||)`
+
 
 ### 4. Evaluation Metrics (Data Science & Search Relevance)
 The output of the engine will be quantitatively measured using standard search relevance metrics.
@@ -80,18 +94,26 @@ The repository follows a package-oriented layout with source code inside `src/` 
   - `src/data_loader.py` - dataset cleaning and image resizing
   - `src/nlp_model.py` - text embedding encoder
   - `src/cv_model.py` - image embedding encoder
-  - `src/fusion_model.py` - multimodal fusion model
-  - `src/embedding_pipeline.py` - generates text, image, and fused embeddings
+  - `src/fusion_model.py` - multimodal fusion model supporting structured modality dropout
+  - `src/train_fusion.py` - self-supervised multi-view contrastive training loop
+  - `src/embedding_pipeline.py` - generates text, image, and fused embeddings with model training
   - `src/vector_db.py` - FAISS-based similarity search wrapper
   - `src/recommender.py` - personalization and ranking logic
   - `src/utils.py` - utility helpers for path and directory management
 - `scripts/` - helper scripts for dataset generation and experimentation
-- `tests/` - placeholder and future automated tests
-- `data/` - dataset inputs, cleaned outputs, and embeddings
+- `tests/` - unit tests for indexing, search, database, metrics, and fusion model
+- `data/` - dataset inputs, cleaned outputs, embeddings, and trained checkpoints
 
 ## V. Current Implementation Status
 
 - Day 1: dataset and pipeline setup completed.
 - Day 2: multimodal embedding generation and ranking logic implemented.
-- Package layout restructured so all source modules are under `src/`.
-- Documentation updated to reflect the current file structure and usage commands.
+- Restructured package layout to keep all source modules under `src/`.
+- Integrated SQLite database logging for search latency, relevance grades, and metrics.
+- Completed **Novelty Pathway 1 (Adaptive Modality Dropout)**:
+  * Redesigned `FusionModel` to support Bernoulli-structured modality dropout.
+  * Implemented PyTorch self-supervised multi-view NT-Xent + Consistency loss training loop in `train_fusion.py`.
+  * Added single-index routing logic to support queries with missing modalities (text-only, image-only).
+  * Added interactive Ablation Study Simulator in Streamlit dashboard (`app.py`).
+  * Wrote automated tests in `tests/test_fusion_dropout.py`.
+

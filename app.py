@@ -6,7 +6,7 @@ import requests
 
 # Set page config
 st.set_page_config(
-    page_title="Multimodal Search Engine & Evaluation Dashboard",
+    page_title="Bridging the Modality Gap: Adaptive Feature Dropout and Hybrid Indexing in Multimodal E-Commerce Search",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -140,8 +140,8 @@ def check_backend() -> bool:
 # Title header
 st.markdown("""
 <div style="text-align: center; padding: 10px 0 20px 0;">
-    <h1 style="margin-bottom: 0;">🚀 Hybrid Search & Context-Aware Recommender</h1>
-    <p style="color: #8b92b6; font-size: 1.1rem;">Side-by-side semantic VSD (FAISS) and classical vocabulary indexing (SPIMI)</p>
+    <h1 style="margin-bottom: 0;">Bridging the Modality Gap: Adaptive Feature Dropout and Hybrid Indexing in Multimodal E-Commerce Search</h1>
+    <p style="color: #8b92b6; font-size: 1.1rem;">Adaptive Feature Dropout & Hybrid Indexing in Multimodal E-Commerce Search</p>
 </div>
 """, unsafe_allow_html=True)
 st.markdown("---")
@@ -149,10 +149,10 @@ st.markdown("---")
 backend_online = check_backend()
 
 if not backend_online:
-    st.error("⚠️ Backend API Server Offline. Please start the backend service by running `python -m src` in your terminal.")
+    st.error("Backend API Server Offline. Please start the backend service by running `python -m src` in your terminal.")
 else:
     # --- SIDEBAR: USER & HISTORY CONTEXT ---
-    st.sidebar.title("👤 Active User Profile")
+    st.sidebar.title("Active User Profile")
 
     # Load unique User IDs dynamically
     user_ids = ["u001"]
@@ -165,6 +165,16 @@ else:
         user_ids,
         help="Select a user profile to personalize recommendation scores based on their history."
     )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Index Settings")
+    selected_index_mode = st.sidebar.radio(
+        "Search Index Mode",
+        ["Unified Resilient Fused Index (Novelty 1)", "Split Multi-Indices (Baseline)"],
+        help="Choose whether to query a single fused index or split indexes for text/image inputs."
+    )
+    index_mode = "fused" if "Unified" in selected_index_mode else "split"
+
 
     # Fetch User Interaction History details
     user_history_list = []
@@ -192,12 +202,12 @@ else:
 
     # Sidebar User History Timeline
     if user_history_list:
-        with st.sidebar.expander("🕒 User Past Activity History"):
+        with st.sidebar.expander("User Past Activity History"):
             hist_rows = []
             for h in user_history_list[:15]:
                 item_id = h["item_id"]
                 action = h["interaction_type"].upper()
-                rating_str = f"⭐ {h['rating']}" if h.get("rating") else ""
+                rating_str = f"{h['rating']} Stars" if h.get("rating") else ""
                 t_str = h["timestamp"][:10]  # Date only
                 
                 # Fetch title from catalog
@@ -213,7 +223,7 @@ else:
             st.dataframe(pd.DataFrame(hist_rows), use_container_width=True, hide_index=True)
 
     # --- MAIN TABS ---
-    tab_search, tab_analyst = st.tabs(["🔎 Side-by-Side Search", "📊 Performance Evaluation Hub (TryRating)"])
+    tab_search, tab_analyst = st.tabs(["Side-by-Side Search", "Performance Evaluation Hub (TryRating)"])
 
     # --- TAB 1: SEARCH & SIDE-BY-SIDE RECOMMEND ---
     with tab_search:
@@ -247,8 +257,10 @@ else:
                 data = {
                     "user_id": selected_user,
                     "query": text_query or "",
-                    "search_type": "vector"
+                    "search_type": "vector",
+                    "index_mode": index_mode
                 }
+
                 if uploaded_image is not None:
                     files = {"image": (uploaded_image.name, uploaded_image.getvalue(), uploaded_image.type)}
                 
@@ -288,7 +300,7 @@ else:
 
             # Left Column: Semantic Vector Search
             with col_vector_view:
-                st.markdown('<div class="search-column-header header-vector">🤖 SEMANTIC VECTOR SEARCH (FAISS)</div>', unsafe_allow_html=True)
+                st.markdown('<div class="search-column-header header-vector">SEMANTIC VECTOR SEARCH (FAISS)</div>', unsafe_allow_html=True)
                 
                 if not vector_results:
                     st.info("No matches found for vector search. Provide text or image queries.")
@@ -324,7 +336,7 @@ else:
                                 if img_path.exists():
                                     st.image(str(img_path), use_container_width=True)
                                 else:
-                                    st.caption("📷 No Image")
+                                    st.caption("No Image")
                             
                             with col_c_details:
                                 st.markdown(f"##### #{item_id}: {title} {badge_html}", unsafe_allow_html=True)
@@ -358,16 +370,16 @@ else:
                                     try:
                                         grade_resp = requests.post(f"{API_URL}/grade", data=grade_data)
                                         if grade_resp.status_code == 200:
-                                            st.toast(f"Graded Vector Result #{item_id} as {selected_rating+1} stars!", icon="⭐")
+                                            st.toast(f"Graded Vector Result #{item_id} as {selected_rating+1} stars!")
                                     except Exception:
                                         pass
 
             # Right Column: Classical Boolean (SPIMI) Search
             with col_classical_view:
-                st.markdown('<div class="search-column-header header-classical">📜 CLASSICAL SPIMI INDEX SEARCH</div>', unsafe_allow_html=True)
+                st.markdown('<div class="search-column-header header-classical">CLASSICAL SPIMI INDEX SEARCH</div>', unsafe_allow_html=True)
                 
                 if uploaded_image and not text_query:
-                    st.warning("⚠️ Classical SPIMI Boolean search only indexes textual metadata and does not support image uploads.")
+                    st.warning("Classical SPIMI Boolean search only indexes textual metadata and does not support image uploads.")
                 elif not text_query:
                     st.info("Enter a text search query keywords to display classical exact matches.")
                 elif not classical_results:
@@ -403,7 +415,7 @@ else:
                                 if img_path.exists():
                                     st.image(str(img_path), use_container_width=True)
                                 else:
-                                    st.caption("📷 No Image")
+                                    st.caption("No Image")
                             
                             with col_c_details:
                                 st.markdown(f"##### #{item_id}: {title} {badge_html}", unsafe_allow_html=True)
@@ -435,7 +447,7 @@ else:
                                     try:
                                         grade_resp = requests.post(f"{API_URL}/grade", data=grade_data)
                                         if grade_resp.status_code == 200:
-                                            st.toast(f"Graded Classical Result #{item_id} as {selected_rating+1} stars!", icon="⭐")
+                                            st.toast(f"Graded Classical Result #{item_id} as {selected_rating+1} stars!")
                                     except Exception:
                                         pass
 
@@ -465,7 +477,7 @@ else:
                 
                 # Left Metrics Column: Vector Search Results
                 with col_v_metrics:
-                    st.markdown('<div class="metric-container-title" style="color:#00f5d4;">🤖 Semantic Vector Performance</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="metric-container-title" style="color:#00f5d4;">Semantic Vector Performance</div>', unsafe_allow_html=True)
                     col_m1, col_m2, col_m3 = st.columns(3)
                     with col_m1:
                         st.markdown(f"""
@@ -491,7 +503,7 @@ else:
 
                 # Right Metrics Column: Classical Inverted index results
                 with col_c_metrics:
-                    st.markdown('<div class="metric-container-title" style="color:#ff9f1c;">📜 Classical SPIMI Performance</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="metric-container-title" style="color:#ff9f1c;">Classical SPIMI Performance</div>', unsafe_allow_html=True)
                     col_m1, col_m2, col_m3 = st.columns(3)
                     with col_m1:
                         st.markdown(f"""
@@ -515,9 +527,44 @@ else:
                         </div>
                         """, unsafe_allow_html=True)
 
+                # Add side-by-side native charts for clear scientific visualization
+                st.markdown("#### Comparative Analytics Visualizations")
+                col_chart_relevance, col_chart_latency = st.columns(2)
+                
+                with col_chart_relevance:
+                    st.markdown("<p style='text-align:center; font-weight:bold; color:#a1a8c9;'>Relevance Benchmarks Comparison</p>", unsafe_allow_html=True)
+                    relevance_df = pd.DataFrame({
+                        "Metric": ["NDCG@10", "MAP Score", "NDCG@10", "MAP Score"],
+                        "Engine": ["Semantic Vector Search", "Semantic Vector Search", "Classical Keyword Search", "Classical Keyword Search"],
+                        "Score": [v_ndcg, v_map, c_ndcg, c_map]
+                    })
+                    st.bar_chart(
+                        relevance_df,
+                        x="Metric",
+                        y="Score",
+                        color="Engine",
+                        stack=False,
+                        use_container_width=True
+                    )
+                    
+                with col_chart_latency:
+                    st.markdown("<p style='text-align:center; font-weight:bold; color:#a1a8c9;'>Retrieval Speed Comparison (lower is better)</p>", unsafe_allow_html=True)
+                    latency_df = pd.DataFrame({
+                        "Engine": ["Semantic Vector (FAISS)", "Classical Keyword (SPIMI)"],
+                        "Latency (ms)": [v_latency, c_latency]
+                    })
+                    st.bar_chart(
+                        latency_df,
+                        x="Engine",
+                        y="Latency (ms)",
+                        color="Engine",
+                        use_container_width=True
+                    )
+
                 # Add a sub-section for Scientific Research Paper Benchmarks
                 st.markdown("---")
-                st.markdown("### 🔬 Academic Publication Benchmarks")
+
+                st.markdown("### Academic Publication Benchmarks")
                 
                 # Fetch significance & modality data
                 p_ndcg = metrics_data.get("stats", {}).get("p_value_ndcg", 1.0)
@@ -539,21 +586,21 @@ else:
                     with col_res1:
                         st.markdown(f"""
                         <div class="paper-box">
-                            <h5 style="margin-top:0; color:#00f5d4;">⏱️ Result 1: Average Retrieval Latency</h5>
+                            <h5 style="margin-top:0; color:#00f5d4;">Result 1: Average Retrieval Latency</h5>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Semantic Vector Search (FAISS):</b> {v_latency:.2f} ms</p>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical Boolean Search (SPIMI):</b> {c_latency:.2f} ms</p>
                             <span style="font-size:0.8rem; color:#8b92b6;">*Note: Caching the neural encoders globally ensures semantic queries complete in sub-500ms.*</span>
                         </div>
                         
                         <div class="paper-box">
-                            <h5 style="margin-top:0; color:#00f5d4;">📈 Result 2: Ranking Effectiveness (NDCG@10)</h5>
+                            <h5 style="margin-top:0; color:#00f5d4;">Result 2: Ranking Effectiveness (NDCG@10)</h5>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Vector NDCG@10:</b> {v_ndcg:.4f}</p>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical NDCG@10:</b> {c_ndcg:.4f}</p>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Relative Improvement:</b> {((v_ndcg - c_ndcg) / (c_ndcg if c_ndcg else 1.0) * 100):.1f}%</p>
                         </div>
                         
                         <div class="paper-box">
-                            <h5 style="margin-top:0; color:#00f5d4;">🎯 Result 3: Retrieval Precision (MAP)</h5>
+                            <h5 style="margin-top:0; color:#00f5d4;">Result 3: Retrieval Precision (MAP)</h5>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Vector Mean Average Precision:</b> {v_map:.4f}</p>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical Mean Average Precision:</b> {c_map:.4f}</p>
                             <p style="font-size:0.9rem; margin-bottom:5px;"><b>Relative Improvement:</b> {((v_map - c_map) / (c_map if c_map else 1.0) * 100):.1f}%</p>
@@ -567,14 +614,14 @@ else:
                         
                         st.markdown(f"""
                         <div class="paper-box" style="min-height: 250px;">
-                            <h5 style="margin-top:0; color:#ff9f1c;">🧬 Result 4: Empirical Significance Tests (Independent t-test)</h5>
+                            <h5 style="margin-top:0; color:#ff9f1c;">Result 4: Empirical Significance Tests (Independent t-test)</h5>
                             <p style="font-size:0.9rem; margin-bottom:8px;"><b>NDCG p-value:</b> {p_ndcg:.5f} {sig_ndcg_badge}</p>
                             <p style="font-size:0.9rem; margin-bottom:8px;"><b>MAP p-value:</b> {p_map:.5f} {sig_map_badge}</p>
                             <span style="font-size:0.8rem; color:#8b92b6;">*Paired comparisons are performed at alpha = 0.05. A p-value &lt; 0.05 indicates that vector search outperforms the classical keyword matching baseline with high statistical significance.*</span>
                         </div>
                         
                         <div class="paper-box" style="min-height: 235px;">
-                            <h5 style="margin-top:0; color:#ff9f1c;">📊 Result 5: Modality Gating Contribution Breakdown</h5>
+                            <h5 style="margin-top:0; color:#ff9f1c;">Result 5: Modality Gating Contribution Breakdown</h5>
                             <p style="font-size:0.9rem; margin-bottom:10px;">Average influence of modalities across all multimodal vector query results:</p>
                         </div>
                         """, unsafe_allow_html=True)
@@ -587,16 +634,169 @@ else:
             st.error(f"Failed to fetch system metrics: {e}")
 
         # Metrics documentation expander
-        with st.expander("ℹ️ How are NDCG@10 and MAP benchmarked?"):
+        with st.expander("How are NDCG@10 and MAP benchmarked?"):
             st.markdown("""
             *   **NDCG@10 (Normalized Discounted Cumulative Gain at Rank 10)**: 
-                NDCG evaluates the relevance and exact ranking structure. A score of `1.0000` indicates that the engine ranked highly-graded relevant items exactly at the top. The score discounts grades (1-5 stars) logarithmically for lower ranks.
+            NDCG evaluates the relevance and exact ranking structure. A score of `1.0000` indicates that the engine ranked highly-graded relevant items exactly at the top. The score discounts grades (1-5 stars) logarithmically for lower ranks.
             *   **MAP (Mean Average Precision)**:
-                MAP measures precision across binary relevance categories. Items with a grade of $\ge 3$ stars are treated as relevant. MAP calculates the mean average precision across all queries evaluated.
+            MAP measures precision across binary relevance categories. Items with a grade of $\ge 3$ stars are treated as relevant. MAP calculates the mean average precision across all queries evaluated.
             """)
 
+        # Missing Modality Ablation Simulator
+        st.markdown("---")
+        st.markdown("### Missing-Modality Resilience Ablation Simulator (Novelty 1)")
+        st.markdown("""
+        Demonstrate the academic impact of **Adaptive Modality Dropout** by simulating missing images in the product catalog. 
+        Adjust the slider to drop a percentage of product images, then click **Run Ablation Analysis** to compare the performance 
+        of the untrained concatenation baseline against our proposed trained model.
+        """)
+        
+        ablation_missing_rate = st.slider(
+            "Catalog Missing Image Ratio",
+            min_value=0.0,
+            max_value=0.9,
+            value=0.5,
+            step=0.1,
+            help="The percentage of catalog items that will have their visual image embeddings zeroed out."
+        )
+        
+        if st.button("Run Ablation Analysis", use_container_width=True, type="primary"):
+            with st.spinner("Simulating missing modality states and re-evaluating index search..."):
+                try:
+                    payload = {"missing_rate": ablation_missing_rate}
+                    ablation_resp = requests.post(f"{API_URL}/simulate-ablation", json=payload)
+                    if ablation_resp.status_code == 200:
+                        data = ablation_resp.json()
+                        
+                        # Display results side-by-side
+                        col_abl_baseline, col_abl_proposed = st.columns(2)
+                        
+                        with col_abl_baseline:
+                            st.markdown('<div class="metric-container-title" style="color:#d97706;">Baseline Untrained Concatenation</div>', unsafe_allow_html=True)
+                            base_ndcg = data.get("baseline", {}).get("NDCG@10", 0.0)
+                            base_map = data.get("baseline", {}).get("MAP", 0.0)
+                            col_b1, col_b2 = st.columns(2)
+                            with col_b1:
+                                st.markdown(f"""
+                                <div class="kpi-card">
+                                    <div class="kpi-value kpi-value-classical">{base_ndcg:.4f}</div>
+                                    <div class="kpi-label">NDCG @ 10</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with col_b2:
+                                st.markdown(f"""
+                                <div class="kpi-card">
+                                    <div class="kpi-value kpi-value-classical">{base_map:.4f}</div>
+                                    <div class="kpi-label">MAP Score</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                
+                        with col_abl_proposed:
+                            st.markdown('<div class="metric-container-title" style="color:#00f5d4;">Proposed Dropout-Resilient Fusion</div>', unsafe_allow_html=True)
+                            prop_ndcg = data.get("proposed", {}).get("NDCG@10", 0.0)
+                            prop_map = data.get("proposed", {}).get("MAP", 0.0)
+                            col_p1, col_p2 = st.columns(2)
+                            with col_p1:
+                                st.markdown(f"""
+                                <div class="kpi-card">
+                                    <div class="kpi-value">{prop_ndcg:.4f}</div>
+                                    <div class="kpi-label">NDCG @ 10</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with col_p2:
+                                st.markdown(f"""
+                                <div class="kpi-card">
+                                    <div class="kpi-value">{prop_map:.4f}</div>
+                                    <div class="kpi-label">MAP Score</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        
+                        # Show relative improvements
+                        diff_ndcg = prop_ndcg - base_ndcg
+                        diff_map = prop_map - base_map
+                        st.success(f"""
+                        **Simulation Findings:** At a **{ablation_missing_rate*100:.0f}%** missing image rate, 
+                        the Dropout-Resilient model shows a relative NDCG@10 improvement of **{((diff_ndcg / (base_ndcg if base_ndcg else 1.0)) * 100):.1f}%** 
+                        and a MAP improvement of **{((diff_map / (base_map if base_map else 1.0)) * 100):.1f}%** compared to the untrained baseline.
+                        """)
+
+                        # Multi-point ablation curves visualization
+                        st.markdown("#### Degradation Analysis Curves (0% to 90% Missing Modalities)")
+                        curve_rates = [0.0, 0.2, 0.4, 0.6, 0.8, 0.9]
+                        
+                        progress_bar = st.progress(0.0, text="Calculating degradation curves...")
+                        curve_data = []
+                        
+                        for idx, rate in enumerate(curve_rates):
+                            progress_bar.progress((idx + 1) / len(curve_rates), text=f"Simulating catalog with {rate*100:.0f}% missing images...")
+                            try:
+                                c_resp = requests.post(f"{API_URL}/simulate-ablation", json={"missing_rate": rate})
+                                if c_resp.status_code == 200:
+                                    c_data = c_resp.json()
+                                    # Append baseline
+                                    curve_data.append({
+                                        "Missing Image Ratio (%)": int(rate * 100),
+                                        "Score": c_data.get("baseline", {}).get("NDCG@10", 0.0),
+                                        "Model Configuration": "Baseline (Untrained Concatenation)",
+                                        "Metric": "NDCG@10"
+                                    })
+                                    curve_data.append({
+                                        "Missing Image Ratio (%)": int(rate * 100),
+                                        "Score": c_data.get("baseline", {}).get("MAP", 0.0),
+                                        "Model Configuration": "Baseline (Untrained Concatenation)",
+                                        "Metric": "MAP"
+                                    })
+                                    # Append proposed
+                                    curve_data.append({
+                                        "Missing Image Ratio (%)": int(rate * 100),
+                                        "Score": c_data.get("proposed", {}).get("NDCG@10", 0.0),
+                                        "Model Configuration": "Trained Resilient Fusion (Novelty 1)",
+                                        "Metric": "NDCG@10"
+                                    })
+                                    curve_data.append({
+                                        "Missing Image Ratio (%)": int(rate * 100),
+                                        "Score": c_data.get("proposed", {}).get("MAP", 0.0),
+                                        "Model Configuration": "Trained Resilient Fusion (Novelty 1)",
+                                        "Metric": "MAP"
+                                    })
+                            except Exception as e:
+                                pass
+                                
+                        progress_bar.empty()
+                        
+                        if curve_data:
+                            curve_df = pd.DataFrame(curve_data)
+                            
+                            col_curve1, col_curve2 = st.columns(2)
+                            with col_curve1:
+                                st.markdown("<p style='text-align:center; font-weight:bold; color:#a1a8c9;'>NDCG@10 Degradation Resistance</p>", unsafe_allow_html=True)
+                                ndcg_df = curve_df[curve_df["Metric"] == "NDCG@10"]
+                                st.line_chart(
+                                    ndcg_df,
+                                    x="Missing Image Ratio (%)",
+                                    y="Score",
+                                    color="Model Configuration",
+                                    use_container_width=True
+                                )
+                            with col_curve2:
+                                st.markdown("<p style='text-align:center; font-weight:bold; color:#a1a8c9;'>MAP Score Degradation Resistance</p>", unsafe_allow_html=True)
+                                map_df = curve_df[curve_df["Metric"] == "MAP"]
+                                st.line_chart(
+                                    map_df,
+                                    x="Missing Image Ratio (%)",
+                                    y="Score",
+                                    color="Model Configuration",
+                                    use_container_width=True
+                                )
+
+                    else:
+                        st.error(f"Ablation endpoint failed: {ablation_resp.text}")
+                except Exception as e:
+                    st.error(f"Error running ablation study: {e}")
+
         # Historic searches
-        st.markdown("### 📋 Query Logs & Audit Portal")
+
+        st.markdown("### Query Logs & Audit Portal")
         try:
             history_resp = requests.get(f"{API_URL}/search-history")
             if history_resp.status_code == 200:
@@ -648,7 +848,7 @@ else:
                                                     }
                                                     grade_resp = requests.post(f"{API_URL}/grade", data=grade_data)
                                                     if grade_resp.status_code == 200:
-                                                        st.toast(f"Logged rating {selected_rating + 1} for item #{res_item_id}!", icon="✅")
+                                                        st.toast(f"Logged rating {selected_rating + 1} for item #{res_item_id}!")
                                         else:
                                             st.warning("No results recorded for this search.")
                                 except Exception as e:

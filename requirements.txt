@@ -3,7 +3,10 @@ uvicorn
 pandas
 numpy
 torch
+torchvision
 transformers
 faiss-cpu
 streamlit
 Pillow
+scipy
+httpx
