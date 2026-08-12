@@ -39,6 +39,10 @@ metadata = None
 spimi_idx = None
 pipeline = None
 
+# Global embedding matrices
+text_embeddings = None
+image_embeddings = None
+
 # We maintain three vector databases
 vector_db_text = None
 vector_db_image = None
@@ -49,6 +53,7 @@ vector_db_fused = None
 async def startup_event():
     global user_scores, metadata, spimi_idx, pipeline
     global vector_db_text, vector_db_image, vector_db_fused
+    global text_embeddings, image_embeddings
 
     # 1. Initialize SQLite Database
     init_db()
@@ -82,16 +87,16 @@ async def startup_event():
         # Text Embeddings Index (dim = 384)
         text_emb_path = EMBEDDING_DIR / "text_embeddings.npy"
         if text_emb_path.exists():
-            text_embs = np.load(text_emb_path)
+            text_embeddings = np.load(text_emb_path)
             vector_db_text = VectorDB(dim=384)
-            vector_db_text.build_index(text_embs)
+            vector_db_text.build_index(text_embeddings)
 
         # Image Embeddings Index (dim = 2048)
         image_emb_path = EMBEDDING_DIR / "image_embeddings.npy"
         if image_emb_path.exists():
-            image_embs = np.load(image_emb_path)
+            image_embeddings = np.load(image_emb_path)
             vector_db_image = VectorDB(dim=2048)
-            vector_db_image.build_index(image_embs)
+            vector_db_image.build_index(image_embeddings)
 
         # Fused Embeddings Index (dim = 256)
         fused_emb_path = EMBEDDING_DIR / "fused_embeddings.npy"
@@ -114,6 +119,9 @@ async def search(
     if metadata is None:
         return {"error": "Metadata catalog not loaded."}
 
+    # Start search latency timer
+    start_time = time.time()
+
     # Normalize inputs
     query_str = query.strip() if query else ""
 
@@ -125,6 +133,8 @@ async def search(
 
     candidate_items = []  # List of (item_id, score)
     saved_image_path = ""
+    query_text_emb = None
+    query_image_emb = None
 
     # Process search query image if uploaded
     if image is not None:
@@ -168,12 +178,16 @@ async def search(
             if vector_db_fused is None:
                 return {"error": "Fused embedding index is not loaded."}
             # Extract text embedding
-            text_emb = pipeline.text_model.encode([query_str]).to(pipeline.device)
+            text_emb_tensor = pipeline.text_model.encode([query_str]).to(pipeline.device)
+            query_text_emb = text_emb_tensor.cpu().numpy()
+            
             # Extract image embedding
-            image_emb = pipeline.image_model.encode([saved_image_path]).to(pipeline.device)
+            image_emb_tensor = pipeline.image_model.encode([saved_image_path]).to(pipeline.device)
+            query_image_emb = image_emb_tensor.cpu().numpy()
+            
             # Fuse embeddings
             with torch.no_grad():
-                fused_emb = pipeline.fusion_model(text_emb, image_emb).cpu().numpy()
+                fused_emb = pipeline.fusion_model(text_emb_tensor, image_emb_tensor).cpu().numpy()
 
             distances, indices = vector_db_fused.search(fused_emb, k=20)
             candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
@@ -182,16 +196,16 @@ async def search(
         elif query_str:
             if vector_db_text is None:
                 return {"error": "Text embedding index is not loaded."}
-            text_emb = pipeline.text_model.encode([query_str]).numpy()
-            distances, indices = vector_db_text.search(text_emb, k=20)
+            query_text_emb = pipeline.text_model.encode([query_str]).numpy()
+            distances, indices = vector_db_text.search(query_text_emb, k=20)
             candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
 
         # Scenario C: Image-only Semantic Search
         elif saved_image_path:
             if vector_db_image is None:
                 return {"error": "Image embedding index is not loaded."}
-            image_emb = pipeline.image_model.encode([saved_image_path]).numpy()
-            distances, indices = vector_db_image.search(image_emb, k=20)
+            query_image_emb = pipeline.image_model.encode([saved_image_path]).numpy()
+            distances, indices = vector_db_image.search(query_image_emb, k=20)
             candidate_items = [(str(metadata.iloc[idx]["item_id"]), float(dist)) for idx, dist in zip(indices, distances)]
 
     # 3. PERSONALIZATION RE-RANKING
@@ -202,19 +216,50 @@ async def search(
     else:
         ranked = candidate_items
 
-    # 4. STORE SEARCH IN DATABASE
+    # Stop latency timer
+    execution_time_ms = (time.time() - start_time) * 1000
+
+    # 4. COMPUTE MODAL SIMILARITIES FOR RETRIEVED PRODUCTS
+    base_scores_dict = {str(item_id): float(base_score) for item_id, base_score in candidate_items}
+    results_to_log = []
+
+    for item_id, score in ranked:
+        matched_idx = metadata.index[metadata["item_id"] == str(item_id)]
+        text_sim = 0.0
+        image_sim = 0.0
+
+        if not matched_idx.empty:
+            idx = matched_idx[0]
+
+            # Text similarity
+            if query_text_emb is not None and text_embeddings is not None:
+                q_text_vec = query_text_emb.reshape(-1)
+                item_text_vec = text_embeddings[idx].reshape(-1)
+                text_sim = float(np.dot(q_text_vec, item_text_vec))
+            elif search_type == "classical":
+                text_sim = base_scores_dict.get(str(item_id), 0.0)
+
+            # Image similarity
+            if query_image_emb is not None and image_embeddings is not None:
+                q_img_vec = query_image_emb.reshape(-1)
+                item_img_vec = image_embeddings[idx].reshape(-1)
+                image_sim = float(np.dot(q_img_vec, item_img_vec))
+
+        results_to_log.append((item_id, score, text_sim, image_sim))
+
+    # 5. STORE SEARCH IN DATABASE
     log_search(
         user_id=user_id,
         query_text=query_str,
         image_path=saved_image_path,
         search_type=f"{search_type}_{'fused' if query_str and saved_image_path else ('text' if query_str else 'image')}" if search_type == "vector" else "classical",
-        results=ranked[:20]  # Store top 20 in database for analysis
+        results=results_to_log[:20],
+        execution_time_ms=execution_time_ms
     )
 
-    # 5. POPULATE SEARCH RESULT DETAILS (Top 10)
-    base_scores_dict = {str(item_id): float(base_score) for item_id, base_score in candidate_items}
+    # 6. POPULATE SEARCH RESULT DETAILS (Top 10)
     results = []
-    for item_id, score in ranked[:10]:
+    for item_id, score, text_sim, image_sim in results_to_log[:10]:
         matched_rows = metadata[metadata["item_id"] == str(item_id)]
         if not matched_rows.empty:
             row = matched_rows.iloc[0].to_dict()
@@ -222,6 +267,8 @@ async def search(
             base_val = base_scores_dict.get(str(item_id), float(score))
             row["base_score"] = base_val
             row["boost"] = float(score - base_val)
+            row["text_similarity"] = text_sim
+            row["image_similarity"] = image_sim
             results.append(row)
 
     return {
@@ -281,9 +328,10 @@ async def search_results(search_id: int):
             row = matched_rows.iloc[0].to_dict()
             row["rank"] = r["rank"]
             row["score"] = r["score"]
+            row["text_similarity"] = r["text_similarity"]
+            row["image_similarity"] = r["image_similarity"]
             detailed_results.append(row)
     return {"search_id": search_id, "results": detailed_results}
-
 
 
 @app.get("/user-history/{user_id}")

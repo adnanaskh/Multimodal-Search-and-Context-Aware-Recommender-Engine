@@ -19,6 +19,7 @@ def init_db() -> None:
             query_text TEXT,
             image_path TEXT,
             search_type TEXT NOT NULL,
+            execution_time_ms REAL,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -30,6 +31,8 @@ def init_db() -> None:
             item_id TEXT NOT NULL,
             rank INTEGER NOT NULL,
             score REAL NOT NULL,
+            text_similarity REAL DEFAULT 0.0,
+            image_similarity REAL DEFAULT 0.0,
             PRIMARY KEY (search_id, item_id),
             FOREIGN KEY(search_id) REFERENCES search_history(search_id) ON DELETE CASCADE
         )
@@ -57,37 +60,35 @@ def log_search(
     query_text: str | None,
     image_path: str | None,
     search_type: str,
-    results: List[tuple]
+    results: List[tuple],
+    execution_time_ms: float = 0.0
 ) -> int:
-    """Log a search query and its returned results.
-
-    Args:
-        user_id: ID of the user searching
-        query_text: text input (if any)
-        image_path: path to the query image (if any)
-        search_type: type of search (vector or classical)
-        results: list of tuples of (item_id, score)
-
-    Returns:
-        inserted search_id
-    """
+    """Log a search query, execution duration, and returned results (with modal similarities)."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # Normalise optional arguments to empty strings to avoid NULL issues when checking grades
     q_text = query_text or ""
     i_path = image_path or ""
 
     cursor.execute(
-        "INSERT INTO search_history (user_id, query_text, image_path, search_type) VALUES (?, ?, ?, ?)",
-        (user_id, q_text, i_path, search_type),
+        "INSERT INTO search_history (user_id, query_text, image_path, search_type, execution_time_ms) VALUES (?, ?, ?, ?, ?)",
+        (user_id, q_text, i_path, search_type, execution_time_ms),
     )
     search_id = cursor.lastrowid
 
-    for rank, (item_id, score) in enumerate(results, start=1):
+    for rank, item_data in enumerate(results, start=1):
+        # Allow tuple unpacking whether it is (item_id, score) or (item_id, score, text_sim, image_sim)
+        item_id = item_data[0]
+        score = item_data[1]
+        text_sim = item_data[2] if len(item_data) > 2 else 0.0
+        image_sim = item_data[3] if len(item_data) > 3 else 0.0
+
         cursor.execute(
-            "INSERT INTO search_results (search_id, item_id, rank, score) VALUES (?, ?, ?, ?)",
-            (search_id, str(item_id), rank, score),
+            """
+            INSERT INTO search_results (search_id, item_id, rank, score, text_similarity, image_similarity) 
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (search_id, str(item_id), rank, score, text_sim, image_sim),
         )
 
     conn.commit()
@@ -142,7 +143,7 @@ def get_search_results(search_id: int) -> List[Dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT item_id, rank, score FROM search_results WHERE search_id = ? ORDER BY rank ASC",
+        "SELECT item_id, rank, score, text_similarity, image_similarity FROM search_results WHERE search_id = ? ORDER BY rank ASC",
         (search_id,),
     )
     rows = [dict(r) for r in cursor.fetchall()]

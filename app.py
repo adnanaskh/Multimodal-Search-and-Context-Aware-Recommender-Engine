@@ -115,18 +115,12 @@ st.markdown("""
         color: #00f5d4;
         font-weight: bold;
     }
-    .history-type-badge {
-        padding: 2px 6px;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: bold;
-        color: white;
-    }
-    .history-vector {
-        background-color: #2563eb;
-    }
-    .history-classical {
-        background-color: #d97706;
+    .paper-box {
+        background-color: #161826;
+        border-radius: 8px;
+        border: 1px solid #252a3f;
+        padding: 20px;
+        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -143,7 +137,7 @@ def check_backend() -> bool:
         return False
 
 
-# Title header with gradient styling
+# Title header
 st.markdown("""
 <div style="text-align: center; padding: 10px 0 20px 0;">
     <h1 style="margin-bottom: 0;">🚀 Hybrid Search & Context-Aware Recommender</h1>
@@ -200,7 +194,7 @@ else:
     if user_history_list:
         with st.sidebar.expander("🕒 User Past Activity History"):
             hist_rows = []
-            for h in user_history_list[:15]:  # show top 15 recent actions
+            for h in user_history_list[:15]:
                 item_id = h["item_id"]
                 action = h["interaction_type"].upper()
                 rating_str = f"⭐ {h['rating']}" if h.get("rating") else ""
@@ -209,8 +203,6 @@ else:
                 # Fetch title from catalog
                 title = f"Product #{item_id}"
                 if Path("data/mock_catalog.csv").exists():
-                    cat_row = interactions_df[interactions_df["item_id"] == int(item_id)]
-                    # We look up catalog title
                     cat_df = pd.read_csv("data/mock_catalog.csv")
                     matched = cat_df[cat_df["item_id"].astype(str) == str(item_id)]
                     if not matched.empty:
@@ -231,7 +223,7 @@ else:
         with col_text:
             text_query = st.text_input(
                 "Enter text keywords:",
-                placeholder="e.g. Compact Mug, Performance Earbuds, Classic Shoes...",
+                placeholder="e.g. Modern Backpack, Sports Jacket, Eco Mug...",
                 help="Enter search queries to evaluate matching keywords."
             )
 
@@ -247,6 +239,8 @@ else:
         if search_clicked:
             # 1. Fetch Vector search results
             vector_results = []
+            q_text_log = ""
+            q_img_log = ""
             if text_query or uploaded_image:
                 search_endpoint = f"{API_URL}/search"
                 files = None
@@ -262,7 +256,10 @@ else:
                     try:
                         resp = requests.post(search_endpoint, data=data, files=files)
                         if resp.status_code == 200:
-                            vector_results = resp.json().get("results", [])
+                            res_json = resp.json()
+                            vector_results = res_json.get("results", [])
+                            q_text_log = res_json.get("query", "")
+                            q_img_log = res_json.get("image_path", "")
                     except Exception as e:
                         st.error(f"Vector search request failed: {e}")
 
@@ -278,7 +275,11 @@ else:
                 try:
                     resp = requests.post(search_endpoint, data=data)
                     if resp.status_code == 200:
-                        classical_results = resp.json().get("results", [])
+                        res_json = resp.json()
+                        classical_results = res_json.get("results", [])
+                        if not q_text_log:
+                            q_text_log = res_json.get("query", "")
+                            q_img_log = res_json.get("image_path", "")
                 except Exception as e:
                     st.error(f"Classical search request failed: {e}")
 
@@ -302,6 +303,8 @@ else:
                         base_val = item.get("base_score", score)
                         boost = item.get("boost", 0.0)
                         img_fname = item["image_filename"]
+                        t_sim = item.get("text_similarity", 0.0)
+                        i_sim = item.get("image_similarity", 0.0)
 
                         # Recommender history badge
                         badge_html = ""
@@ -328,11 +331,13 @@ else:
                                 st.markdown(f"<span style='font-size:0.85rem; color:#b2bccd;'>{desc}</span>", unsafe_allow_html=True)
                                 st.markdown(f"**Category:** {category} | **Price:** `${price}`")
                                 
-                                # Explainable scores
-                                sim_pct = min(max(base_val * 100, 0), 100)
+                                # Explainable scores & progress bars
+                                st.progress(t_sim, text=f"Textual semantic similarity: {t_sim*100:.1f}%")
+                                if uploaded_image:
+                                    st.progress(i_sim, text=f"Visual similarity match: {i_sim*100:.1f}%")
+                                
                                 st.markdown(f"""
                                 <div style="margin-top:5px;">
-                                    <span class="explain-tag">Match Similarity: <b>{sim_pct:.1f}%</b></span>
                                     <span class="explain-tag">Recommender Boost: <b class="explain-boost">+{boost:.1f}</b></span>
                                     <span class="explain-tag" style="background-color:#1e293b;">Final Rank score: <b>{score:.3f}</b></span>
                                 </div>
@@ -347,8 +352,8 @@ else:
                                         "user_id": selected_user,
                                         "item_id": item_id,
                                         "rating": selected_rating + 1,
-                                        "query_text": text_query or "",
-                                        "image_path": str(IMAGE_DIR / img_fname) if uploaded_image else ""
+                                        "query_text": q_text_log,
+                                        "image_path": q_img_log
                                     }
                                     try:
                                         grade_resp = requests.post(f"{API_URL}/grade", data=grade_data)
@@ -378,6 +383,7 @@ else:
                         base_val = item.get("base_score", score)
                         boost = item.get("boost", 0.0)
                         img_fname = item["image_filename"]
+                        t_sim = item.get("text_similarity", 0.0)
 
                         # Recommender history badge
                         badge_html = ""
@@ -404,11 +410,11 @@ else:
                                 st.markdown(f"<span style='font-size:0.85rem; color:#b2bccd;'>{desc}</span>", unsafe_allow_html=True)
                                 st.markdown(f"**Category:** {category} | **Price:** `${price}`")
                                 
-                                # Explainable scores
-                                overlap_pct = min(base_val * 100, 100)
+                                # Overlap progress bar
+                                st.progress(t_sim, text=f"Query keyword vocabulary overlap: {t_sim*100:.0f}%")
+                                
                                 st.markdown(f"""
                                 <div style="margin-top:5px;">
-                                    <span class="explain-tag">Token Overlap: <b>{overlap_pct:.0f}%</b></span>
                                     <span class="explain-tag">Recommender Boost: <b class="explain-boost">+{boost:.1f}</b></span>
                                     <span class="explain-tag" style="background-color:#1e293b;">Final Rank score: <b>{score:.3f}</b></span>
                                 </div>
@@ -423,8 +429,8 @@ else:
                                         "user_id": selected_user,
                                         "item_id": item_id,
                                         "rating": selected_rating + 1,
-                                        "query_text": text_query,
-                                        "image_path": ""
+                                        "query_text": q_text_log,
+                                        "image_path": q_img_log
                                     }
                                     try:
                                         grade_resp = requests.post(f"{API_URL}/grade", data=grade_data)
@@ -435,7 +441,7 @@ else:
 
     # --- TAB 2: ANALYST EVALUATION HUB (TRYRATING) ---
     with tab_analyst:
-        st.subheader("Relevance Evaluation & Algorithm Benchmarks")
+        st.subheader("Algorithm Evaluation Dashboard")
 
         # KPI Columns: Compare classical vs vector performance side-by-side
         metrics_endpoint = f"{API_URL}/metrics"
@@ -447,10 +453,12 @@ else:
                 # Fetch scores
                 v_ndcg = metrics_data.get("vector", {}).get("NDCG@10", 0.0)
                 v_map = metrics_data.get("vector", {}).get("MAP", 0.0)
+                v_latency = metrics_data.get("vector", {}).get("latency_ms", 0.0)
                 v_count = metrics_data.get("vector", {}).get("count", 0)
 
                 c_ndcg = metrics_data.get("classical", {}).get("NDCG@10", 0.0)
                 c_map = metrics_data.get("classical", {}).get("MAP", 0.0)
+                c_latency = metrics_data.get("classical", {}).get("latency_ms", 0.0)
                 c_count = metrics_data.get("classical", {}).get("count", 0)
 
                 col_v_metrics, col_c_metrics = st.columns(2)
@@ -507,6 +515,74 @@ else:
                         </div>
                         """, unsafe_allow_html=True)
 
+                # Add a sub-section for Scientific Research Paper Benchmarks
+                st.markdown("---")
+                st.markdown("### 🔬 Academic Publication Benchmarks")
+                
+                # Fetch significance & modality data
+                p_ndcg = metrics_data.get("stats", {}).get("p_value_ndcg", 1.0)
+                p_map = metrics_data.get("stats", {}).get("p_value_map", 1.0)
+                is_ndcg_sig = metrics_data.get("stats", {}).get("is_ndcg_significant", False)
+                is_map_sig = metrics_data.get("stats", {}).get("is_map_significant", False)
+                
+                text_contrib = metrics_data.get("modalities", {}).get("text_contribution_pct", 50.0)
+                image_contrib = metrics_data.get("modalities", {}).get("image_contribution_pct", 50.0)
+
+                with st.container(border=True):
+                    # We will output 5 results directly
+                    st.markdown("""
+                    The following empirical results are computed directly from the system logs and ratings database, suitable for publication:
+                    """)
+                    
+                    col_res1, col_res2 = st.columns(2)
+                    
+                    with col_res1:
+                        st.markdown(f"""
+                        <div class="paper-box">
+                            <h5 style="margin-top:0; color:#00f5d4;">⏱️ Result 1: Average Retrieval Latency</h5>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Semantic Vector Search (FAISS):</b> {v_latency:.2f} ms</p>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical Boolean Search (SPIMI):</b> {c_latency:.2f} ms</p>
+                            <span style="font-size:0.8rem; color:#8b92b6;">*Note: Caching the neural encoders globally ensures semantic queries complete in sub-500ms.*</span>
+                        </div>
+                        
+                        <div class="paper-box">
+                            <h5 style="margin-top:0; color:#00f5d4;">📈 Result 2: Ranking Effectiveness (NDCG@10)</h5>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Vector NDCG@10:</b> {v_ndcg:.4f}</p>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical NDCG@10:</b> {c_ndcg:.4f}</p>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Relative Improvement:</b> {((v_ndcg - c_ndcg) / (c_ndcg if c_ndcg else 1.0) * 100):.1f}%</p>
+                        </div>
+                        
+                        <div class="paper-box">
+                            <h5 style="margin-top:0; color:#00f5d4;">🎯 Result 3: Retrieval Precision (MAP)</h5>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Vector Mean Average Precision:</b> {v_map:.4f}</p>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Classical Mean Average Precision:</b> {c_map:.4f}</p>
+                            <p style="font-size:0.9rem; margin-bottom:5px;"><b>Relative Improvement:</b> {((v_map - c_map) / (c_map if c_map else 1.0) * 100):.1f}%</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                    with col_res2:
+                        # Draw significance alerts
+                        sig_ndcg_badge = '<span style="background-color:#38a169; color:white; padding:2px 8px; border-radius:4px; font-weight:bold; font-size:0.75rem;">STATISTICALLY SIGNIFICANT</span>' if is_ndcg_sig else '<span style="background-color:#718096; color:white; padding:2px 8px; border-radius:4px; font-weight:bold; font-size:0.75rem;">NOT SIGNIFICANT</span>'
+                        sig_map_badge = '<span style="background-color:#38a169; color:white; padding:2px 8px; border-radius:4px; font-weight:bold; font-size:0.75rem;">STATISTICALLY SIGNIFICANT</span>' if is_map_sig else '<span style="background-color:#718096; color:white; padding:2px 8px; border-radius:4px; font-weight:bold; font-size:0.75rem;">NOT SIGNIFICANT</span>'
+                        
+                        st.markdown(f"""
+                        <div class="paper-box" style="min-height: 250px;">
+                            <h5 style="margin-top:0; color:#ff9f1c;">🧬 Result 4: Empirical Significance Tests (Independent t-test)</h5>
+                            <p style="font-size:0.9rem; margin-bottom:8px;"><b>NDCG p-value:</b> {p_ndcg:.5f} {sig_ndcg_badge}</p>
+                            <p style="font-size:0.9rem; margin-bottom:8px;"><b>MAP p-value:</b> {p_map:.5f} {sig_map_badge}</p>
+                            <span style="font-size:0.8rem; color:#8b92b6;">*Paired comparisons are performed at alpha = 0.05. A p-value &lt; 0.05 indicates that vector search outperforms the classical keyword matching baseline with high statistical significance.*</span>
+                        </div>
+                        
+                        <div class="paper-box" style="min-height: 235px;">
+                            <h5 style="margin-top:0; color:#ff9f1c;">📊 Result 5: Modality Gating Contribution Breakdown</h5>
+                            <p style="font-size:0.9rem; margin-bottom:10px;">Average influence of modalities across all multimodal vector query results:</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Add progress bars inside result 5 box area
+                        st.progress(text_contrib / 100.0, text=f"Textual Keywords influence weight: {text_contrib:.1f}%")
+                        st.progress(image_contrib / 100.0, text=f"Visual Image influence weight: {image_contrib:.1f}%")
+
         except Exception as e:
             st.error(f"Failed to fetch system metrics: {e}")
 
@@ -540,10 +616,6 @@ else:
                         query_desc = qtxt if qtxt else ""
                         if imgpath:
                             query_desc += f" [Image: {Path(imgpath).name}]"
-
-                        # expansion expander
-                        method_badge = "VECTOR" if "vector" in stype else "CLASSICAL"
-                        badge_class = "history-vector" if "vector" in stype else "history-classical"
 
                         with st.expander(f"Search #{sid}: User {uid} | Query: '{query_desc}' | Method: {stype} ({time_str})"):
                             col_h_details, col_h_img = st.columns([3, 1])

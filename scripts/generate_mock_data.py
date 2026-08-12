@@ -87,7 +87,7 @@ colors = [
     (156, 39, 176),
 ]
 
-num_products = 100
+num_products = 3000
 rows = []
 for idx in range(1, num_products + 1):
     category = random.choice(categories)
