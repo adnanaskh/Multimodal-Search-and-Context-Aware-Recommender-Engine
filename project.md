@@ -69,3 +69,29 @@ The system will follow a microservices-inspired architecture, divided into offli
 4. The query vector is sent to the Vector Database to retrieve the top 100 candidate items.
 5. The Recommender Core takes these 100 items, cross-references the user's profile, and re-ranks them.
 6. The final top 10 results are returned to the Client.
+
+## IV. Project Structure
+
+The repository follows a package-oriented layout with source code inside `src/` and data assets in `data/`.
+
+- `src/` - Python source package
+  - `src/__main__.py` - entrypoint for `python -m src`
+  - `src/main.py` - FastAPI service and search/grade endpoints
+  - `src/data_loader.py` - dataset cleaning and image resizing
+  - `src/nlp_model.py` - text embedding encoder
+  - `src/cv_model.py` - image embedding encoder
+  - `src/fusion_model.py` - multimodal fusion model
+  - `src/embedding_pipeline.py` - generates text, image, and fused embeddings
+  - `src/vector_db.py` - FAISS-based similarity search wrapper
+  - `src/recommender.py` - personalization and ranking logic
+  - `src/utils.py` - utility helpers for path and directory management
+- `scripts/` - helper scripts for dataset generation and experimentation
+- `tests/` - placeholder and future automated tests
+- `data/` - dataset inputs, cleaned outputs, and embeddings
+
+## V. Current Implementation Status
+
+- Day 1: dataset and pipeline setup completed.
+- Day 2: multimodal embedding generation and ranking logic implemented.
+- Package layout restructured so all source modules are under `src/`.
+- Documentation updated to reflect the current file structure and usage commands.
