@@ -138,7 +138,7 @@ for item_id, title, description, image_filename, category, price in rows:
     draw.text((x, y), text, fill="white", font=font)
     img.save(IMAGE_DIR / image_filename)
 
-num_users = 30
+num_users = 10
 user_ids = [f"u{uid:03d}" for uid in range(1, num_users + 1)]
 interaction_types = ["click", "purchase", "rating"]
 interaction_weights = [0.6, 0.25, 0.15]

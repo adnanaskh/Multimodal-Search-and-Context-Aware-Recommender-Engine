@@ -38,4 +38,8 @@ Thumbs.db
 PROGRESS.md
 current_context_file.md
 
+# Database & local state
+data/*.db
+data/spimi_index.json
+.streamlit/credentials.toml
 
